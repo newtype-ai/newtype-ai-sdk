@@ -50,8 +50,12 @@ export interface VerifySuccess {
   agent_id: string;
   domain: string;
   card: AgentCard | null;
+  /** Which branch the card came from — the domain branch if pushed, otherwise 'main'. */
+  branch: string;
   /** Solana wallet address derived from the agent's Ed25519 public key. */
   solanaAddress?: string;
+  /** HMAC-signed read token for fetching the agent's domain branch card. 30-day expiry. */
+  readToken: string;
 }
 
 /** Failed verification result. */
@@ -65,6 +69,11 @@ export type VerifyResult = VerifySuccess | VerifyFailure;
 export interface VerifyOptions {
   /** Override the API base URL. Defaults to https://api.newtype-ai.org */
   apiUrl?: string;
+}
+
+export interface FetchCardOptions {
+  /** Override the base URL for agent card hosting. Defaults to https://agent-{agent_id}.newtype-ai.org */
+  baseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,4 +114,39 @@ export async function verifyAgent(
   });
 
   return res.json() as Promise<VerifyResult>;
+}
+
+/**
+ * Fetch an agent's domain branch card using a read token.
+ *
+ * The read token is returned by verifyAgent() on successful verification.
+ * It is scoped to a specific agent_id + domain and expires after 30 days.
+ *
+ * @example
+ * ```ts
+ * import { verifyAgent, fetchAgentCard } from '@newtype-ai/sdk';
+ *
+ * const result = await verifyAgent(payload);
+ * if (result.verified) {
+ *   // Later, fetch the latest card:
+ *   const card = await fetchAgentCard(result.agent_id, result.domain, result.readToken);
+ * }
+ * ```
+ */
+export async function fetchAgentCard(
+  agentId: string,
+  domain: string,
+  readToken: string,
+  options?: FetchCardOptions,
+): Promise<AgentCard | null> {
+  const baseUrl =
+    options?.baseUrl ?? `https://agent-${agentId}.newtype-ai.org`;
+  const url = `${baseUrl}/.well-known/agent-card.json?branch=${encodeURIComponent(domain)}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${readToken}` },
+  });
+
+  if (!res.ok) return null;
+  return res.json() as Promise<AgentCard>;
 }
