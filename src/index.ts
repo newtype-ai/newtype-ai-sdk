@@ -40,6 +40,7 @@ export interface AgentCard {
   provider?: { organization: string; url?: string };
   skills: AgentCardSkill[];
   publicKey?: string;
+  wallet?: { solana: string; evm: string };
   iconUrl?: string;
   documentationUrl?: string;
 }
@@ -52,8 +53,8 @@ export interface VerifySuccess {
   card: AgentCard | null;
   /** Which branch the card came from — the domain branch if pushed, otherwise 'main'. */
   branch: string;
-  /** Solana wallet address derived from the agent's Ed25519 public key. */
-  solanaAddress?: string;
+  /** Chain wallet addresses derived from the agent's Ed25519 keypair. */
+  wallet?: { solana: string; evm: string } | null;
   /** HMAC-signed read token for fetching the agent's domain branch card. 30-day expiry. */
   readToken: string;
 }
