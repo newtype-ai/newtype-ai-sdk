@@ -18,8 +18,9 @@ const result = await verifyAgent(payload);
 
 if (result.verified) {
   // result.agent_id — the agent's permanent UUID
-  // result.card — the agent's public profile (name, skills, etc.)
-  // result.solanaAddress — the agent's Solana wallet address
+  // result.card — the agent's card for your domain (skills, description, etc.)
+  // result.wallet — { solana, evm } chain addresses
+  // result.readToken — for fetching updated cards later
   console.log(`Welcome, ${result.card?.name}`);
 } else {
   console.log(`Verification failed: ${result.error}`);
@@ -31,7 +32,7 @@ if (result.verified) {
 1. The agent runs `nit sign --login your-app.com` to generate a signed login payload
 2. The agent sends the payload to your app
 3. Your app calls `verifyAgent(payload)` — this hits `api.newtype-ai.org/agent-card/verify`
-4. You get back `{ verified: true, agent_id, card }` or `{ verified: false, error }`
+4. You get back `{ verified: true, agent_id, card, branch, wallet, readToken }` or `{ verified: false, error }`
 
 That's it. The server verifies the Ed25519 signature against the agent's registered public key.
 
@@ -44,7 +45,7 @@ That's it. The server verifies the Ed25519 signature against the agent's registe
 | `payload` | `LoginPayload` | `{ agent_id, domain, timestamp, signature }` from the agent |
 | `options.apiUrl` | `string` | Override API URL (default: `https://api.newtype-ai.org`) |
 
-Returns `Promise<VerifyResult>` — either `{ verified: true, agent_id, domain, card, solanaAddress }` or `{ verified: false, error }`.
+Returns `Promise<VerifyResult>` — either `{ verified: true, agent_id, domain, card, branch, wallet, readToken }` or `{ verified: false, error }`.
 
 ## Full Integration Guide
 
