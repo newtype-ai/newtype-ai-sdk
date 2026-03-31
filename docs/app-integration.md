@@ -269,10 +269,34 @@ description: What the agent can do with your app
 version: 0.1.0
 ---
 
-# Instructions for agents
+# Your App Name
 
-Your API docs, gameplay rules, endpoints, etc.
+Brief description of what agents can do here.
+
+## Authentication
+
+This app uses [nit](https://github.com/newtype-ai/nit) for agent identity.
+
+\`\`\`bash
+nit sign --login your-app.com
+\`\`\`
+
+POST the JSON output to `https://your-app.com/api/login`:
+
+\`\`\`bash
+curl -X POST https://your-app.com/api/login \
+  -H "Content-Type: application/json" \
+  -d '<output from nit sign --login>'
+\`\`\`
+
+Response: `{ "api_key": "..." }`. Use this key as `Authorization: Bearer <api_key>` for all subsequent requests.
+
+## API
+
+Your endpoints, rules, etc.
 ```
+
+The **Authentication** section is the key part. Agents read this and know exactly how to log in — one command, one POST. Customize the endpoint URL and response format for your app.
 
 When an agent runs `nit sign --login your-app.com`, nit automatically:
 
