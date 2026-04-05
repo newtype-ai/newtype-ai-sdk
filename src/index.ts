@@ -6,6 +6,90 @@
  */
 
 // ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/** Typed error for HTTP and shape failures in the SDK. */
+export class NitSdkError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'NitSdkError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Throw if a user-supplied URL is not HTTPS (localhost exempt for dev). */
+function assertHttps(url: string, label: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:') return;
+    if (
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+    )
+      return;
+    throw new TypeError(
+      `${label} must use HTTPS (got ${parsed.protocol}//${parsed.hostname})`,
+    );
+  } catch (e) {
+    if (e instanceof TypeError) throw e;
+    throw new TypeError(`${label} is not a valid URL: ${url}`);
+  }
+}
+
+/** Validate the LoginPayload fields before sending to the server. */
+function validatePayload(payload: LoginPayload): void {
+  if (typeof payload.agent_id !== 'string' || !UUID_RE.test(payload.agent_id)) {
+    throw new TypeError(
+      'payload.agent_id must be a UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)',
+    );
+  }
+  if (
+    typeof payload.domain !== 'string' ||
+    payload.domain.length === 0 ||
+    payload.domain.length > 253
+  ) {
+    throw new TypeError(
+      'payload.domain must be a non-empty string (max 253 chars)',
+    );
+  }
+  if (
+    typeof payload.timestamp !== 'number' ||
+    !Number.isFinite(payload.timestamp) ||
+    payload.timestamp <= 0
+  ) {
+    throw new TypeError('payload.timestamp must be a finite positive number');
+  }
+  if (typeof payload.signature !== 'string' || payload.signature.length === 0) {
+    throw new TypeError('payload.signature must be a non-empty string');
+  }
+}
+
+/** Fetch with an AbortController timeout. */
+function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timer),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -105,11 +189,15 @@ export interface VerifyOptions {
   apiUrl?: string;
   /** App-defined trust policy. Server evaluates and returns admitted: true/false. */
   policy?: VerifyPolicy;
+  /** Fetch timeout in milliseconds. Defaults to 10 000. */
+  timeoutMs?: number;
 }
 
 export interface FetchCardOptions {
   /** Override the base URL for agent card hosting. Defaults to https://agent-{agent_id}.newtype-ai.org */
   baseUrl?: string;
+  /** Fetch timeout in milliseconds. Defaults to 10 000. */
+  timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,21 +224,43 @@ export async function verifyAgent(
   payload: LoginPayload,
   options?: VerifyOptions,
 ): Promise<VerifyResult> {
+  validatePayload(payload);
+
   const apiUrl = options?.apiUrl ?? DEFAULT_API_URL;
+  if (options?.apiUrl) assertHttps(apiUrl, 'options.apiUrl');
 
-  const res = await fetch(`${apiUrl}/agent-card/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      agent_id: payload.agent_id,
-      domain: payload.domain,
-      timestamp: payload.timestamp,
-      signature: payload.signature,
-      ...(options?.policy ? { policy: options.policy } : {}),
-    }),
-  });
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  return res.json() as Promise<VerifyResult>;
+  const res = await fetchWithTimeout(
+    `${apiUrl}/agent-card/verify`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: payload.agent_id,
+        domain: payload.domain,
+        timestamp: payload.timestamp,
+        signature: payload.signature,
+        ...(options?.policy ? { policy: options.policy } : {}),
+      }),
+    },
+    timeoutMs,
+  );
+
+  if (!res.ok) {
+    return { verified: false, error: `Server error (HTTP ${res.status})` };
+  }
+
+  const data: unknown = await res.json();
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    typeof (data as Record<string, unknown>).verified !== 'boolean'
+  ) {
+    return { verified: false, error: 'Malformed server response (missing verified field)' };
+  }
+
+  return data as VerifyResult;
 }
 
 /**
@@ -178,12 +288,36 @@ export async function fetchAgentCard(
 ): Promise<AgentCard | null> {
   const baseUrl =
     options?.baseUrl ?? `https://agent-${agentId}.newtype-ai.org`;
+  if (options?.baseUrl) assertHttps(baseUrl, 'options.baseUrl');
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const url = `${baseUrl}/.well-known/agent-card.json?branch=${encodeURIComponent(domain)}`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${readToken}` },
-  });
+  const res = await fetchWithTimeout(
+    url,
+    { headers: { Authorization: `Bearer ${readToken}` } },
+    timeoutMs,
+  );
 
-  if (!res.ok) return null;
-  return res.json() as Promise<AgentCard>;
+  // 404 → card not found (expected)
+  if (res.status === 404) return null;
+
+  // Other failures → throw so callers can distinguish auth/server errors
+  if (!res.ok) {
+    throw new NitSdkError(
+      `Failed to fetch agent card (HTTP ${res.status})`,
+      res.status,
+    );
+  }
+
+  const data: unknown = await res.json();
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    typeof (data as Record<string, unknown>).name !== 'string'
+  ) {
+    throw new NitSdkError('Malformed agent card response (missing name field)', 0);
+  }
+
+  return data as AgentCard;
 }
