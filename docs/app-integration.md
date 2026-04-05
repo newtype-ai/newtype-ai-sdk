@@ -120,6 +120,8 @@ The server acts as an **identity registry** — like a credit bureau, it stores 
 
 Like Stripe Radar: the server evaluates rules server-side for convenience, and returns raw metadata for transparency. Your app can also inspect the `identity` object for custom logic beyond what `policy` supports.
 
+**Policy behavior for new agents:** When an agent has no stored identity metadata (brand new or TOFU registration not yet complete), `min_age_seconds` and `max_login_rate_per_hour` cause `admitted: false`. New agents with no history fail these checks rather than silently bypassing them. If your app should accept brand-new agents, omit these fields from `policy` or handle `admitted: false` with a "try again later" message.
+
 ### Response (failure)
 
 ```json
@@ -135,6 +137,15 @@ Like Stripe Radar: the server evaluates rules server-side for convenience, and r
 | 401 | Timestamp expired | Payload older than 5 minutes — ask agent to sign again |
 | 403 | Signature verification failed | Signature doesn't match the agent's registered public key |
 | 404 | Agent not found | Agent hasn't pushed their identity yet (`nit push`) |
+
+**SDK error handling:** When using `@newtype-ai/nit-sdk`, error behavior differs from raw HTTP:
+
+| Function | 404 response | Other HTTP errors | Malformed JSON |
+|----------|-------------|-------------------|----------------|
+| `verifyAgent()` | Returns `{ verified: false, error: "..." }` | Returns `{ verified: false, error: "..." }` | Returns `{ verified: false, error: "..." }` |
+| `fetchAgentCard()` | Returns `null` | Throws `NitSdkError` with `.status` | Throws `NitSdkError` with `status: 0` |
+
+Previously, `fetchAgentCard()` returned `null` for all failures silently. It now distinguishes 404 (expected — branch not pushed) from server/auth errors (unexpected — should be surfaced).
 
 ## Code Examples
 
@@ -167,10 +178,11 @@ if (result.verified) {
 Or use the SDK: `npm install @newtype-ai/nit-sdk`
 
 ```javascript
-import { verifyAgent, fetchAgentCard } from '@newtype-ai/nit-sdk';
+import { verifyAgent, fetchAgentCard, NitSdkError } from '@newtype-ai/nit-sdk';
 
 const result = await verifyAgent(payload, {
-  policy: { max_identities_per_machine: 10, min_age_seconds: 3600 }
+  policy: { max_identities_per_machine: 10, min_age_seconds: 3600 },
+  timeoutMs: 5_000,
 });
 if (result.verified && result.admitted) {
   // result.card — domain-specific card (or main if no domain branch)
@@ -178,7 +190,14 @@ if (result.verified && result.admitted) {
   // result.readToken — store this to fetch updated cards later
 
   // Fetch the latest card anytime during the 30-day window:
-  const freshCard = await fetchAgentCard(result.agent_id, 'your-app.com', result.readToken);
+  try {
+    const freshCard = await fetchAgentCard(result.agent_id, 'your-app.com', result.readToken);
+    // freshCard is null if the domain branch doesn't exist (404)
+  } catch (err) {
+    if (err instanceof NitSdkError) {
+      console.error(`Card fetch failed (HTTP ${err.status}): ${err.message}`);
+    }
+  }
 }
 ```
 
@@ -227,7 +246,7 @@ After login, agents may update their card (add skills, change description). Use 
 ### Using the SDK
 
 ```typescript
-import { verifyAgent, fetchAgentCard } from '@newtype-ai/nit-sdk';
+import { verifyAgent, fetchAgentCard, NitSdkError } from '@newtype-ai/nit-sdk';
 
 // At login
 const result = await verifyAgent(payload);
@@ -237,7 +256,19 @@ if (result.verified) {
 }
 
 // Later — fetch the latest card
-const latestCard = await fetchAgentCard(agent_id, 'your-app.com', readToken);
+try {
+  const latestCard = await fetchAgentCard(agent_id, 'your-app.com', readToken, {
+    timeoutMs: 5_000,
+  });
+  if (!latestCard) {
+    // 404 — agent hasn't pushed a branch for your domain
+  }
+} catch (err) {
+  if (err instanceof NitSdkError) {
+    // HTTP 401 (token expired), 500 (server error), etc.
+    console.error(`Failed to fetch card: ${err.message} (HTTP ${err.status})`);
+  }
+}
 ```
 
 ### Using fetch directly
@@ -377,3 +408,6 @@ Agents using nit will automatically fetch your updated `skill.md` during re-logi
 - **Replay protection**: Payloads expire after 5 minutes. Always use the timestamp from the agent's payload, not your own.
 - **Domain binding**: The domain is signed into the payload. A signature for `app-a.com` cannot be reused on `app-b.com`.
 - **No secrets needed**: Your app doesn't need any API keys or secrets to call the verify endpoint.
+- **HTTPS enforcement**: The SDK requires `https://` for custom `apiUrl` and `baseUrl` options. Localhost is exempt for development.
+- **Request timeout**: All SDK HTTP calls default to a 10-second timeout (configurable via `timeoutMs`). Prevents indefinite hangs if the server is unreachable.
+- **Input validation**: The SDK validates the login payload before sending: `agent_id` must match UUID format, `domain` must be non-empty (max 253 chars), `timestamp` must be finite and positive, `signature` must be non-empty. Invalid payloads throw `TypeError` immediately.
