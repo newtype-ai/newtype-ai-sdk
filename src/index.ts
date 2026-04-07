@@ -139,6 +139,20 @@ export interface IdentityMetadata {
   total_logins: number;
   last_login_timestamp: number | null;
   unique_domains: number;
+  /** Country of last push (ISO 3166-1 alpha-2, e.g., "US"). Server-observed. */
+  last_push_country: string | null;
+  /** ASN of last push (e.g., "13335"). Server-observed. */
+  last_push_asn: string | null;
+  /** Number of unique IPs across all pushes. Server-observed. */
+  unique_push_ips: number;
+  /** Total number of pushes. Server-observed. */
+  total_pushes: number;
+  /** OS and architecture (e.g., "darwin-arm64"). Client-declared. */
+  platform: string | null;
+  /** SHA-256 of hostname. Client-declared. */
+  hostname_hash: string | null;
+  /** SHA-256 of workspace path. Client-declared. */
+  workspace_hash: string | null;
 }
 
 /** App-defined trust policy. Server evaluates and returns admitted: true/false. */
