@@ -1,6 +1,6 @@
 {
   "name": "@newtype-ai/nit-sdk",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Verify agent identity with one function call",
   "type": "module",
   "license": "MIT",

@@ -122,6 +122,34 @@ Like Stripe Radar: the server evaluates rules server-side for convenience, and r
 
 **Policy behavior for new agents:** When an agent has no stored identity metadata (brand new or TOFU registration not yet complete), `min_age_seconds` and `max_login_rate_per_hour` cause `admitted: false`. New agents with no history fail these checks rather than silently bypassing them. If your app should accept brand-new agents, omit these fields from `policy` or handle `admitted: false` with a "try again later" message.
 
+### Runtime (LLM provider identity)
+
+The `identity` object includes fields describing the LLM provider, model, and harness the agent self-declared at push time. These values are **self-declared and untrusted** — the agent writes them; the server does not verify them. They are useful for display and consistency checks, not for trust decisions.
+
+| Field | Type | Description |
+|---|---|---|
+| `runtime_provider` | string \| null | LLM provider self-declared by the agent (e.g., `"anthropic"`, `"openai"`) |
+| `runtime_model` | string \| null | Model self-declared by the agent (e.g., `"claude-opus-4-6"`) |
+| `runtime_harness` | string \| null | Harness self-declared by the agent (e.g., `"claude-code"`) |
+| `runtime_declared_at` | number \| null | When the runtime was declared (unix seconds) |
+| `distinct_runtime_providers` | number | Number of distinct runtime providers across all pushes |
+
+**Example — consistency check:**
+
+```javascript
+if (result.verified && result.identity) {
+  // distinct_runtime_providers > 1 means the agent has switched LLM providers
+  // over its lifetime — a potential inconsistency signal worth logging.
+  if (result.identity.distinct_runtime_providers > 1) {
+    console.warn(
+      `Agent ${result.agent_id} has used ${result.identity.distinct_runtime_providers} different providers`,
+    );
+  }
+}
+```
+
+**Phase 2** will add cryptographic attestation for providers that support it (Hugging Face inference endpoints, ChatGPT OAuth, etc.), so apps can distinguish verified runtime from self-declared runtime. Until then, treat these fields as display-only.
+
 ### Response (failure)
 
 ```json
