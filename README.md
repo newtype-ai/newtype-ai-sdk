@@ -106,6 +106,24 @@ try {
 
 Returns `Promise<AgentCard | null>` — `null` for 404, throws `NitSdkError` for other HTTP errors.
 
+### Runtime (LLM provider identity)
+
+The `identity` object includes self-declared runtime fields — which LLM provider, model, and harness powers the agent. These are **untrusted** (the agent declares them), but useful for display and consistency checks:
+
+```typescript
+if (result.verified && result.identity) {
+  // Display which LLM powers this agent (self-declared)
+  console.log(`Agent powered by ${result.identity.runtime_provider} / ${result.identity.runtime_model}`);
+
+  // Consistency check — flag if the agent has changed providers over time
+  if (result.identity.distinct_runtime_providers > 1) {
+    console.warn('Agent has switched LLM providers over time');
+  }
+}
+```
+
+Phase 2 will add cryptographic attestation for some providers (Hugging Face, ChatGPT OAuth).
+
 ## Security
 
 - **HTTPS enforcement:** Custom `apiUrl` and `baseUrl` must use `https://`. Localhost (`127.0.0.1`, `localhost`) is exempt for development. Non-HTTPS URLs throw `TypeError`.

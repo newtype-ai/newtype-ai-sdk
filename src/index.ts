@@ -153,6 +153,16 @@ export interface IdentityMetadata {
   hostname_hash: string | null;
   /** SHA-256 of workspace path. Client-declared. */
   workspace_hash: string | null;
+  /** LLM provider self-declared by the agent (e.g., "anthropic"). Untrusted. */
+  runtime_provider: string | null;
+  /** Model self-declared by the agent (e.g., "claude-opus-4-6"). Untrusted. */
+  runtime_model: string | null;
+  /** Harness self-declared by the agent (e.g., "claude-code"). Untrusted. */
+  runtime_harness: string | null;
+  /** When the runtime was declared (unix seconds). */
+  runtime_declared_at: number | null;
+  /** Number of distinct runtime providers across all pushes. >1 means the agent changed providers — potential inconsistency signal. */
+  distinct_runtime_providers: number;
 }
 
 /** App-defined trust policy. Server evaluates and returns admitted: true/false. */
